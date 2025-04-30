@@ -1,0 +1,225 @@
+1. Implementing and experimenting with Security Groups and Network Access Control Lists (NACLs) within a custom Virtual Private Cloud (VPC).
+2. Building a production-like environment in a VPC with public and private subnets, an Internet Gateway, a NAT Gateway, an Application Load Balancer, and an Auto Scaling Group.
+
+Here are the detailed steps for each project based on the information in the sources:
+
+# **Project 1: Implementing and Experimenting with Security Groups and NACLs**
+
+This project demonstrates how security is applied at both the subnet level (using NACLs) and the instance level (using Security Groups) within a VPC. The steps involve creating a custom VPC, launching an EC2 instance in a public subnet, deploying a simple application, and then manipulating security rules to control access.
+
+1. **Create a Custom Virtual Private Cloud (VPC)**
+    - Go to the AWS Management Console.
+    - Search for and navigate to the VPC service.
+    - Click on **Create VPC**.
+    - Choose the **VPC and more** option. This option simplifies setup by automatically creating necessary components like subnets, an internet gateway, route tables, a default NACL, and a default Security Group.
+    - Provide a **Name tag** for your VPC (e.g., "demo VPC").
+    - Define the **IPv4 CIDR block** for the VPC (e.g., 10.0.0.0/16). This determines the size of your VPC's IP address range (e.g., /16 provides 65,536 IP addresses).
+    - Specify the **Number of Availability Zones** (e.g., 1 for this demo). The source mentions creating public and private subnets in *both* availability zones if using "VPC and more" default, but the demo focuses on one AZ. Select the number of public subnets (e.g., 1) and private subnets (e.g., 0 or more, but the instance for this demo will be in a public subnet initially).
+    - Under "NAT gateways", select "None" as it's not strictly needed for this specific demo focused on SG/NACL access *from* the internet.
+    - Under "VPC endpoints", select "None".
+    - Click **Create VPC**. AWS will create the VPC and the associated resources like subnets, internet gateway, route tables, NACL, and Security Group. Wait for the creation process to complete.
+
+2. **Launch an EC2 Instance in the Public Subnet**
+    - Navigate to the EC2 service.
+    - Click on **Launch instance**.
+    - Give the instance a name (e.g., "demo instance").
+    - Choose an Amazon Machine Image (AMI) (e.g., Ubuntu).
+    - Select an Instance type (e.g., T2 micro, which is often free tier eligible).
+    - Select or create a **Key pair** to use for SSH access.
+    - Under "Network settings", click **Edit**.
+    - Select the **VPC** you just created (e.g., "demo VPC").
+    - Select the **public subnet** within that VPC.
+    - Ensure **Auto-assign Public IP** is **Enabled**. This is necessary to access the instance directly from the internet for this demo.
+    - Under "Firewall (Security Groups)", you can either select an existing Security Group or **Create security group**. AWS will create a default one if you choose this option when launching into a new VPC. Note the name of the Security Group attached to the instance.
+    - Review other configurations and click **Launch instance**. Wait for the instance to enter the "Running" state.
+
+
+3. **Deploy a Simple Application on the EC2 Instance**
+    - Get the **Public IPv4 address** of your running EC2 instance.
+    - Open your terminal or SSH client.
+    - **SSH into the instance** using your key pair and the `ubuntu` user (for Ubuntu AMI): `ssh -i <your-key-pair.pem> ubuntu@<instance-public-ip>`.
+    - Once logged in, update the instance's packages: `sudo apt update`.
+    - Run a simple Python HTTP server on a specific port (e.g., Port 8000): `Python3 -m http.server 8000`. This command starts a web server serving the contents of the current directory on port 8000.
+
+
+4. **Test Initial Access and Observe Security Group/NACL Defaults**
+    - Open a web browser and try to access your application using the instance's public IP and port 8000 (e.g., `http://<instance-public-ip>:8000`). This attempt should fail.
+    - In the AWS Management Console, navigate back to the EC2 instance details and check its **Security Group**. Note the default inbound rules (often only SSH Port 22 is allowed by default). This is why your web request on port 8000 failed.
+    - Navigate to the VPC service and click on **Network ACLs**. Find the NACL associated with the subnet your instance is in (it's typically the default one created with the VPC). Examine the **Inbound Rules**. The default NACL typically allows all inbound traffic and denies all traffic with a lower priority rule. This shows that the NACL wasn't the blocker initially; the Security Group was.
+
+
+5. **Modify Security Group to Allow Access**
+    - Go back to the EC2 instance details and click on its **Security Group**.
+    - Click on **Edit inbound rules**.
+    - Click **Add rule**.
+    - Set "Type" to **Custom TCP**.
+    - Set "Port range" to the application's port (e.g., **8000**).
+    - Set "Source" to **Anywhere-IPv4 (0.0.0.0/0)** or your specific IP address for better security.
+    - Click **Save rules**.
+
+
+6. **Test Access After Modifying Security Group**
+    - Go back to your web browser and refresh the page accessing `http://<instance-public-ip>:8000`.
+    - The request should now be successful, and you should see the content served by the Python HTTP server (e.g., a directory listing). This confirms the Security Group was successfully updated to allow traffic.
+
+
+7. **Modify NACL to Deny Access**
+    - Navigate back to the **Network ACLs** in the VPC service.
+    - Select the NACL associated with your subnet.
+    - Click on **Edit inbound rules**.
+    - Click **Add new rule**.
+    - Enter a **Rule number** that is lower than the default "DENY all" rule and the default "ALLOW all" rule (which usually has a high number like 100 or more). For example, use rule number **100**. Note: Rule processing order is based on rule number, lowest number first.
+    - Set "Type" to **Custom TCP**.
+    - Set "Port range" to the application's port (e.g., **8000**).
+    - Set "Source" to **Anywhere-IPv4 (0.0.0.0/0)** to match the Security Group rule.
+    - Set **Rule action** to **DENY**.
+    - Ensure that the new DENY rule (e.g., rule 100) appears with a lower rule number (higher priority) than any ALLOW rule for the same port or "All Traffic" that might be present (e.g., the default rule 100 allowing all traffic). If needed, edit the existing ALLOW rule number to be higher (e.g., 200).
+    - Click **Save changes**.
+
+
+8. **Test Access After Modifying NACL**
+    - Go back to your web browser and refresh the page accessing `http://<instance-public-ip>:8000`.
+    - The request should now **fail** again. This demonstrates that the NACL, which acts as the first layer of defense at the subnet level, blocked the traffic before it even reached the instance's Security Group, even though the Security Group's rule would have allowed it.
+
+This concludes the basic Security Group and NACL experimentation project. You can continue experimenting by changing rule numbers, sources (specific IP addresses or CIDR blocks), and actions (ALLOW/DENY) on both the Security Group (ALLOW only) and NACL (ALLOW/DENY) to see how traffic is affected.
+
+
+
+
+
+
+# **Project 2: Building a Production Environment Architecture in a VPC**
+
+This project demonstrates a common architecture for web applications in AWS, placing application instances in private subnets for security and using public-facing resources like a Load Balancer and NAT Gateway for internet access.
+
+1. **Create a Custom Virtual Private Cloud (VPC) with Production Settings**
+    - Navigate to the VPC service.
+    - Click on **Create VPC**.
+    - Choose the **VPC and more** option.
+    - Provide a **Name tag** for your VPC (e.g., "AWS prod example").
+    - Define the **IPv4 CIDR block** (e.g., 10.0.0.0/16).
+    - Set the **Number of Availability Zones** to **two**. This improves availability.
+    - Set the **Number of public subnets** to **two** (one in each AZ).
+    - Set the **Number of private subnets** to **two** (one in each AZ).
+    - Under "NAT gateways", choose **One per Availability Zone** or **One**. A NAT Gateway in the public subnet allows instances in private subnets to access the internet (e.g., for updates) without having a public IP address themselves. Choosing "One per AZ" provides higher availability. Note: Creating a NAT Gateway requires an Elastic IP address, which might fail if you've reached your limit.
+    - Under "VPC endpoints", select **None**.
+    - Review the diagram and the list of resources AWS will create (VPC, 2 public subnets, 2 private subnets, internet gateway, NAT gateway(s), route tables).
+    - Click **Create VPC**. Wait for the creation to complete and for the NAT Gateway(s) to become available (this can take a few minutes).
+
+
+2. **Create a Launch Template for the Auto Scaling Group**
+    - Navigate to the EC2 service.
+    - Scroll down and under "Auto Scaling", click **Launch Templates**.
+    - Click **Create launch template**.
+    - Give the launch template a **Launch template name** (e.g., "AWS prod example").
+    - Provide a description (optional).
+    - Choose an **AMI** (e.g., Ubuntu).
+    - Choose an **Instance type** (e.g., t2.micro).
+    - Select a **Key pair** for SSH access.
+    - Under "Network settings", select **VPC** for the "Network platform".
+    - Leave "Subnet" as **Don't include in launch template** (the ASG will specify subnets).
+    - Under "Firewall (Security Groups)", choose **Create a new security group**.
+    - Provide a name for the new Security Group (e.g., "AWS prod example SG").
+    - Add **Inbound rules** for this Security Group:
+        - Rule 1: Type: **SSH**, Source: **Anywhere** (or a trusted IP range for production). This allows you to SSH into the instances (via a Bastion host, later).
+        - Rule 2: Type: **Custom TCP**, Port range: **8000** (or your application port), Source: **Anywhere** (or a trusted source, like the Load Balancer's Security Group, for production). This allows traffic to the application port.
+    - Review other settings (storage, advanced details) and click **Create launch template**.
+
+
+3. **Create an Auto Scaling Group (ASG)**
+    - Navigate back to the EC2 service.
+    - Under "Auto Scaling", click **Auto Scaling Groups**.
+    - Click **Create Auto Scaling group**.
+    - Give the ASG a name (e.g., "AWS prod example ASG").
+    - For "Launch template", select the launch template you just created (e.g., "AWS prod example").
+    - Click **Next**.
+    - Under "Network", select the **VPC** you created for this project (e.g., "AWS prod example").
+    - Under "Availability Zones and subnets", select the **two private subnets** you created in different AZs. This ensures your application instances are in private subnets and distributed across AZs for high availability.
+    - Click **Next**.
+    - Under "Load balancing", select **Attach to an existing load balancer**.
+    - Choose **Application Load Balancer**.
+    - Leave "Choose a target group" blank for now, as you will create the Target Group next.
+    - (Optional) Configure Health Checks if different from the default.
+    - Click **Next**.
+    - Configure the **Group size**. Set **Desired capacity** (e.g., 2), **Minimum capacity** (e.g., 2), and **Maximum capacity** (e.g., 2 or more if you plan to scale).
+    - Skip scaling policies for this basic setup.
+    - Click **Next**. Skip notifications and tag configurations.
+    - Click **Create Auto Scaling group**. Wait for the ASG to launch the specified number of instances (e.g., 2). Verify that the instances are created in the private subnets in different AZs. Note that these instances will **not** have public IP addresses.
+
+
+4. **Create a Bastion Host (Jump Server)**
+    - Navigate back to the EC2 service.
+    - Click **Launch instance**.
+    - Give the instance a name (e.g., "Bastion host").
+    - Choose an **AMI** (e.g., Ubuntu) and **Instance type** (e.g., t2.micro).
+    - Select the **same Key pair** you used for the private instances.
+    - Under "Network settings", click **Edit**.
+    - Select the **VPC** you created for this project (e.g., "AWS prod example").
+    - Select **one of the public subnets**.
+    - Ensure **Auto-assign Public IP** is **Enabled**.
+    - Under "Firewall (Security Groups)", create a new Security Group or modify the default one to **allow SSH (Port 22) inbound traffic**. For better security, restrict the source to *your* IP address or a trusted IP range instead of Anywhere.
+    - Launch the instance. Wait for it to be running. This instance will be your jump server to access the private instances.
+
+
+5. **Copy SSH Key to the Bastion Host**
+    - The Bastion host needs the private key (`.pem` file) that was used to launch the private instances in the ASG so it can SSH into them.
+    - Get the **Public IPv4 address** of your Bastion host.
+    - Open your local terminal.
+    - Use the `scp` command to securely copy your `.pem` file from your local machine to the Bastion host. Example: `scp -i <your-bastion-key-pair.pem> <path-to-your-private-instance-key-pair.pem> ubuntu@<bastion-public-ip>:`. Replace placeholders.
+    - SSH into the Bastion host to confirm the file was copied: `ssh -i <your-bastion-key-pair.pem> ubuntu@<bastion-public-ip>`. Use `ls` to check for the `.pem` file.
+
+
+6. **SSH from Bastion to Private Instance and Deploy Application**
+    - From your local machine, **SSH into the Bastion host**.
+    - In the AWS Console, get the **Private IPv4 address** of **one** of the private EC2 instances launched by the ASG.
+    - From the Bastion host's terminal, **SSH into the private instance** using its private IP address and the `.pem` file you copied: `ssh -i <name-of-your-key-pair.pem> ubuntu@<private-ip-of-instance>`.
+    - Once logged into the private instance, update packages: `sudo apt update`.
+    - Create a simple HTML file (e.g., `index.html`) with some content. Example content: `<h1>My first AWS project to demonstrate apps in private subnet</h1>`.
+    - Run the Python HTTP server in the directory containing the HTML file on Port 8000: `Python3 -m http.server 8000`.
+    - Note: The source intentionally only deployed the app on *one* instance at this stage to show load balancing behavior.
+
+
+7. **Create a Target Group for the Load Balancer**
+    - Navigate back to the EC2 service.
+    - Under "Load Balancing", click **Target Groups**.
+    - Click **Create target group**.
+    - Choose target type: **Instances**.
+    - Provide a **Target group name** (e.g., "AWS prod example TG").
+    - Set "Protocol" to **HTTP** and "Port" to **8000** (your application port).
+    - Select the **VPC** you created for this project (e.g., "AWS prod example").
+    - Configure **Health checks** (e.g., Protocol HTTP, Path /).
+    - Click **Next**.
+    - Under "Register targets", select the two private EC2 instances launched by your ASG.
+    - Click **Include as pending below**, then click **Create target group**.
+
+
+8. **Create an Application Load Balancer (ALB)**
+    - Navigate back to the EC2 service.
+    - Under "Load Balancing", click **Load Balancers**.
+    - Click **Create Load Balancer**.
+    - Under "Application Load Balancer", click **Create**.
+    - Provide a **Load balancer name** (e.g., "AWS prod example ALB").
+    - Choose **Internet-facing** scheme.
+    - Set "IP address type" to IPv4.
+    - Under "Network mapping", select the **VPC** you created (e.g., "AWS prod example").
+    - Select the **two public subnets** you created in different AZs. The ALB resides in the public subnets.
+    - Under "Security Groups", create a new Security Group or select one that **allows inbound traffic on the listener port** (e.g., create a new one that allows HTTP on Port 80 from Anywhere, as the ALB listener will typically be on Port 80 or 443).
+    - Under "Listeners and routing", configure a listener: Protocol **HTTP**, Port **80**.
+    - For "Default action", select **Forward to** and choose the **Target group** you created (e.g., "AWS prod example TG").
+    - Review other settings and click **Create load balancer**.
+    - Wait for the load balancer to provision and become **Active** (this takes several minutes).
+
+
+9. **Access the Application via the Load Balancer**
+    - Once the ALB is Active, go to its details page.
+    - Copy the **DNS name** of the load balancer.
+    - Open a web browser and paste the DNS name into the address bar and press Enter.
+    - Since the ALB is listening on Port 80 and forwarding to your Target Group (which checks health on Port 8000), and only one instance has the application, you should see the content from the `index.html` file deployed on the healthy instance. The other instance will be marked unhealthy by the target group's health check because the application is not running on it.
+
+
+10. **Assignment/Next Steps (Optional)**
+    - SSH into the second private instance (via the Bastion host, steps 5-6) and deploy the Python HTTP server application on Port 8000, perhaps with different content in the `index.html` file (e.g., "My second AWS project...").
+    - Verify both instances are registered and healthy in the ALB's Target Group.
+    - Access the ALB's DNS name in your web browser multiple times. You should now see the responses load balanced between the two instances.
+
+These steps provide a detailed guide to implementing the two projects described in the provided source material.
